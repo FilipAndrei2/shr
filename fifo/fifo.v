@@ -1,24 +1,15 @@
-//==============================================================
-// FIFO circular
-//   M = latimea datelor (bitii lui DI / DO)
-//   N = latimea adresei  -> adancime = 2^N cuvinte
-//==============================================================
-
 //--------------------------------------------------------------
 // DP-SRAM: un port de scriere (sincron), un port de citire (asincron)
 //--------------------------------------------------------------
-module dp_sram #(
-    parameter M = 8,
-    parameter N = 4
-)(
+module dp_sram (
     input  wire         clk,
     input  wire         we,       // WEW
-    input  wire [N-1:0] addrw,    // ADDRW
-    input  wire [M-1:0] diw,      // DIW
-    input  wire [N-1:0] addrr,    // ADDRR (de la PTRR)
-    output wire [M-1:0] dor       // DOR
+    input  wire [3:0]   addrw,    // ADDRW
+    input  wire [7:0]   diw,      // DIW
+    input  wire [3:0]   addrr,    // ADDRR (de la PTRR)
+    output wire [7:0]   dor       // DOR
 );
-    reg [M-1:0] mem [0:(1<<N)-1];
+    reg [7:0] mem [0:15];
 
     always @(posedge clk)
         if (we)
@@ -31,17 +22,15 @@ endmodule
 // Pointer circular (PTRW / PTRR): numaratoare pe N biti, se
 // intoarc singure la 0
 //--------------------------------------------------------------
-module fifo_ptr #(
-    parameter N = 4
-)(
+module fifo_ptr (
     input  wire         clk,
     input  wire         clear,
     input  wire         inc,
-    output reg  [N-1:0] ptr
+    output reg  [3:0]   ptr
 );
     always @(posedge clk)
         if (clear)
-            ptr <= {N{1'b0}};
+            ptr <= 4'b0000;
         else if (inc)
             ptr <= ptr + 1'b1;
 endmodule
@@ -49,9 +38,7 @@ endmodule
 
 // Blocul de control (cel cu "?"): contor de ocupare, FULL, EMPTY,
 // ERROR si comenzile catre pointeri / memorie
-module fifo_ctrl #(
-    parameter N = 4
-)(
+module fifo_ctrl (
     input  wire clk,
     input  wire clear,
     input  wire push,
@@ -59,14 +46,16 @@ module fifo_ctrl #(
     output wire full,
     output wire empty,
     output wire error,
+    output wire [4:0] ndata,
     output wire inc_w,   // catre PTRW
     output wire inc_r,   // catre PTRR
     output wire we       // catre DP-SRAM
 );
-    reg [N:0] count;     // nr de cuvinte stocate
+    reg [4:0] count;     // nr de cuvinte stocate
 
-    assign full  = (count == (1 << N));
-    assign empty = (count == 0);
+    assign full  = (count == 5'd16);
+    assign empty = (count == 5'd0);
+    assign ndata = count;
 
     // operatii
     assign inc_w = push & ~full;
@@ -78,7 +67,7 @@ module fifo_ctrl #(
 
     always @(posedge clk)
         if (clear)
-            count <= {(N+1){1'b0}};
+            count <= 5'b00000;
         else if (inc_w & ~inc_r)
             count <= count + 1'b1;
         else if (~inc_w & inc_r)
@@ -86,24 +75,22 @@ module fifo_ctrl #(
 endmodule
 
 // modul top
-module fifo_circular #(
-    parameter M = 8,
-    parameter N = 4
-)(
+module fifo (
     input  wire         clk,
     input  wire         clear,
     input  wire         push,
     input  wire         pop,
-    input  wire [M-1:0] di,
-    output wire [M-1:0] do,
+    input  wire [7:0]   diw,
+    output wire [7:0]   dor,
     output wire         full,
     output wire         empty,
-    output wire         error
+    output wire         error,
+    output wire [4:0]   ndata
 );
     wire         inc_w, inc_r, we;
-    wire [N-1:0] addrw, addrr;
+    wire [3:0]   addrw, addrr;
 
-    fifo_ctrl #(.N(N)) u_ctrl (
+    fifo_ctrl u_ctrl (
         .clk   (clk),
         .clear (clear),
         .push  (push),
@@ -111,31 +98,32 @@ module fifo_circular #(
         .full  (full),
         .empty (empty),
         .error (error),
+        .ndata (ndata),
         .inc_w (inc_w),
         .inc_r (inc_r),
         .we    (we)
     );
 
-    fifo_ptr #(.N(N)) u_ptrw (
+    fifo_ptr u_ptrw (
         .clk   (clk),
         .clear (clear),
         .inc   (inc_w),
         .ptr   (addrw)
     );
 
-    fifo_ptr #(.N(N)) u_ptrr (
+    fifo_ptr u_ptrr (
         .clk   (clk),
         .clear (clear),
         .inc   (inc_r),
         .ptr   (addrr)
     );
 
-    dp_sram #(.M(M), .N(N)) u_sram (
+    dp_sram u_sram (
         .clk   (clk),
         .we    (we),
         .addrw (addrw),
-        .diw   (di),
+        .diw   (diw),
         .addrr (addrr),
-        .dor   (do)
+        .dor   (dor)
     );
 endmodule
